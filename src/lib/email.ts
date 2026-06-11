@@ -1,7 +1,21 @@
 import { Resend } from 'resend';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'NiagaKlik <noreply@niagaklik.com>';
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'NiagaKlik <onboarding@resend.dev>';
+
+// Extract actual email address from "Name <email>" format
+const FROM_ADDRESS = FROM_EMAIL.match(/<([^>]+)>/)?.[1] || FROM_EMAIL;
+// Sandbox check: if using resend.dev, only the verified account email can receive
+const IS_SANDBOX = FROM_ADDRESS.endsWith('@resend.dev');
+
+function logRestrictedKeyTip(context: string, error?: any) {
+  if (!error) return;
+  const isRestrictedKey =
+    error?.name === 'restricted_api_key' ||
+    error?.message?.includes('restricted_api_key');
+  if (!isRestrictedKey) return;
+  console.error(`[${context}] Tips: Pastikan RESEND_FROM_EMAIL menggunakan domain yang sudah diverifikasi di Resend, atau gunakan onboarding@resend.dev (sandbox).`);
+}
 
 let resendInstance: Resend | null = null;
 if (RESEND_API_KEY) {
@@ -13,6 +27,10 @@ export async function sendOTPEmail(to: string, otp: string): Promise<boolean> {
     if (!resendInstance) {
       console.log(`[OTP - No API Key] To: ${to}, OTP: ${otp}`);
       return false;
+    }
+
+    if (IS_SANDBOX) {
+      console.warn(`[OTP - Sandbox] Menggunakan sandbox Resend (resend.dev). Email hanya akan terkirim ke email terdaftar di akun Resend.`);
     }
 
     const { data, error } = await resendInstance.emails.send({
@@ -65,6 +83,7 @@ export async function sendOTPEmail(to: string, otp: string): Promise<boolean> {
 
     if (error) {
       console.error(`[OTP Email Failed] To: ${to}, Error:`, error);
+      logRestrictedKeyTip('OTP', error);
       console.log(`[OTP Fallback] To: ${to}, OTP: ${otp}`);
       return false;
     }
@@ -73,6 +92,7 @@ export async function sendOTPEmail(to: string, otp: string): Promise<boolean> {
     return true;
   } catch (error: any) {
     console.error(`[OTP Email Failed] To: ${to}, Error:`, error.message);
+    logRestrictedKeyTip('OTP', error);
     console.log(`[OTP Fallback] To: ${to}, OTP: ${otp}`);
     return false;
   }
@@ -83,6 +103,10 @@ export async function sendPasswordResetEmail(to: string, otp: string): Promise<b
     if (!resendInstance) {
       console.log(`[Reset Password - No API Key] To: ${to}, OTP: ${otp}`);
       return false;
+    }
+
+    if (IS_SANDBOX) {
+      console.warn(`[Reset Password - Sandbox] Menggunakan sandbox Resend (resend.dev). Email hanya akan terkirim ke email terdaftar di akun Resend.`);
     }
 
     const { data, error } = await resendInstance.emails.send({
@@ -128,6 +152,7 @@ export async function sendPasswordResetEmail(to: string, otp: string): Promise<b
 
     if (error) {
       console.error(`[Reset Password Email Failed] To: ${to}, Error:`, error);
+      logRestrictedKeyTip('Reset Password', error);
       console.log(`[Reset Password Fallback] To: ${to}, OTP: ${otp}`);
       return false;
     }
@@ -136,6 +161,7 @@ export async function sendPasswordResetEmail(to: string, otp: string): Promise<b
     return true;
   } catch (error: any) {
     console.error(`[Reset Password Email Failed] To: ${to}, Error:`, error.message);
+    logRestrictedKeyTip('Reset Password', error);
     console.log(`[Reset Password Fallback] To: ${to}, OTP: ${otp}`);
     return false;
   }
