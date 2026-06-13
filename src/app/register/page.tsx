@@ -142,14 +142,46 @@ function RegisterContent() {
 
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1.5">Konfirmasi Password</label>
-              <input
-                type="password"
-                value={form.confirmPassword}
-                onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
-                placeholder="Ulangi password"
-                className="input-field"
-                required
-              />
+              <div className="relative">
+                <input
+                  type="password"
+                  value={form.confirmPassword}
+                  onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+                  placeholder="Ulangi password"
+                  className={`input-field pr-12 ${
+                    form.confirmPassword && form.password !== form.confirmPassword
+                      ? 'border-red-400 focus:ring-red-400 bg-red-50'
+                      : form.confirmPassword && form.password === form.confirmPassword
+                      ? 'border-green-400 focus:ring-green-400 bg-green-50'
+                      : ''
+                  }`}
+                  required
+                />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  {form.confirmPassword && form.password !== form.confirmPassword && (
+                    <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  )}
+                  {form.confirmPassword && form.password === form.confirmPassword && (
+                    <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
+                </div>
+              </div>
+              {form.confirmPassword && form.password !== form.confirmPassword && (
+                <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
+                  <span>⚠</span>
+                  <span>Password tidak cocok</span>
+                </p>
+              )}
+              {form.confirmPassword && form.password === form.confirmPassword && (
+                <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                  <span>✓</span>
+                  <span>Password cocok</span>
+                </p>
+              )}
             </div>
 
             <div>

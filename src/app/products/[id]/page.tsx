@@ -119,11 +119,20 @@ export default function ProductDetailPage() {
 
   return (
     <div className="max-w-[1400px] mx-auto px-6 sm:px-8 lg:px-12 py-8 animate-fade-in-up">
+      {/* Back Button */}
+      <Link
+        href="/"
+        className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-primary-600 mb-4 group transition-colors"
+      >
+        <svg className="w-5 h-5 group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 12H5m7-7l-7 7 7 7" />
+        </svg>
+        <span className="font-medium">Kembali</span>
+      </Link>
+
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-sm text-gray-500 mb-8">
-        <Link href="/" className="hover:text-primary-600 transition-colors">Beranda</Link>
-        <span className="text-gray-300">/</span>
-        <Link href="/products" className="hover:text-primary-600 transition-colors">Produk</Link>
+        <Link href="/products" className="hover:text-primary-600 transition-colors">Semua Produk</Link>
         <span className="text-gray-300">/</span>
         <Link href={`/products?category=${product.category}`} className="hover:text-primary-600 transition-colors">{product.category}</Link>
         <span className="text-gray-300">/</span>

@@ -35,6 +35,11 @@ function LoginContent() {
       const data = await res.json();
 
       if (!res.ok) {
+        if (data.error?.toLowerCase().includes('belum diverifikasi')) {
+          toast('Akun belum diverifikasi. Mengarahkan ke verifikasi...', { icon: '📧' });
+          router.push(`/verify-otp?email=${encodeURIComponent(form.email)}&redirect=${encodeURIComponent(redirect)}`);
+          return;
+        }
         toast.error(data.error || 'Login gagal');
         return;
       }
