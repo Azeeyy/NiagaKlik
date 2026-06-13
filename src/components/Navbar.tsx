@@ -99,6 +99,11 @@ export default function Navbar() {
 
             {/* Desktop Navigation - Role Based */}
             <div className="hidden md:flex items-center gap-6">
+              {/* Home - always shown */}
+              <Link href="/" className="text-gray-600 hover:text-primary-600 font-medium transition-colors relative after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-0.5 after:bg-primary-500 after:transition-all after:duration-300 hover:after:w-full">
+                Home
+              </Link>
+
               {/* Pembeli & Penjual: Products link (not for operator) */}
               {!isOperator && (
                 <Link href="/products" className="text-gray-600 hover:text-primary-600 font-medium transition-colors relative after:absolute after:bottom-[-4px] after:left-0 after:w-0 after:h-0.5 after:bg-primary-500 after:transition-all after:duration-300 hover:after:w-full">

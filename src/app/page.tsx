@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import ProductCard from '@/components/ProductCard';
 import { PRODUCT_CATEGORIES } from '@/lib/utils';
+import { useAuthStore } from '@/lib/store';
 
 function useScrollReveal(threshold = 0.15) {
   const ref = useRef<HTMLDivElement>(null);
@@ -127,6 +128,73 @@ function FeatureCard({ icon, title, desc, index }: { icon: string; title: string
 }
 
 export default function HomePage() {
+  const { isLoggedIn, user } = useAuthStore();
+  const [mounted, setMounted] = useState(false);
+  const [pageVisible, setPageVisible] = useState(true);
+  const [currentView, setCurrentView] = useState<'guest' | 'loggedin'>('guest');
+
+  // Track auth state changes to trigger transition
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+
+    // Determine target view based on auth state
+    const targetView = isLoggedIn && user ? 'loggedin' : 'guest';
+
+    if (targetView === currentView) {
+      // Already showing the right view — just ensure it's visible
+      setPageVisible(true);
+      return;
+    }
+
+    // Fade out current content
+    setPageVisible(false);
+
+    // After fade out completes, switch content and fade in
+    const timeout = setTimeout(() => {
+      setCurrentView(targetView);
+      // Small delay to ensure React has rendered the new content before fading in
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setPageVisible(true);
+        });
+      });
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [isLoggedIn, user, mounted]);
+
+  // Show loading/spinner until client-side auth state is determined
+  if (!mounted) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin h-8 w-8 border-4 border-primary-200 border-t-primary-600 rounded-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`transition-all duration-300 ease-out ${
+        pageVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+      }`}
+    >
+      {currentView === 'loggedin' ? (
+        <LoggedInHomePage user={user!} />
+      ) : (
+        <GuestLandingPage />
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// Guest Landing Page (unchanged from original)
+// ──────────────────────────────────────────────
+function GuestLandingPage() {
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ products: 0, sellers: 0, buyers: 0, orders: 0 });
@@ -480,6 +548,329 @@ export default function HomePage() {
           </AnimatedSection>
         </div>
       </section>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// Logged-in Home Page
+// ──────────────────────────────────────────────
+function LoggedInHomePage({ user }: { user: any }) {
+  const [orders, setOrders] = useState<any[]>([]);
+  const [wallet, setWallet] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  const role = user?.role;
+  const isPembeli = role === 'pembeli';
+  const isPenjual = role === 'penjual';
+  const isOperator = role === 'operator';
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  async function fetchData() {
+    try {
+      if (isPembeli) {
+        const [ordersRes, walletRes] = await Promise.all([
+          fetch('/api/orders?limit=5'),
+          fetch('/api/wallet'),
+        ]);
+        if (ordersRes.ok) {
+          const ordersData = await ordersRes.json();
+          setOrders(ordersData.orders || []);
+        }
+        if (walletRes.ok) {
+          const walletData = await walletRes.json();
+          setWallet(walletData);
+        }
+      } else if (isPenjual) {
+        const [ordersRes, walletRes] = await Promise.all([
+          fetch('/api/seller/reports'),
+          fetch('/api/wallet'),
+        ]);
+        if (ordersRes.ok) {
+          const data = await ordersRes.json();
+          setOrders(data.recentOrders || []);
+        }
+        if (walletRes.ok) {
+          const walletData = await walletRes.json();
+          setWallet(walletData);
+        }
+      } else if (isOperator) {
+        const [ordersRes] = await Promise.all([
+          fetch('/api/operator/reports'),
+        ]);
+        if (ordersRes.ok) {
+          const data = await ordersRes.json();
+          setOrders(data.recentOrders || []);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch homepage data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center pt-20">
+        <div className="animate-spin h-8 w-8 border-4 border-primary-200 border-t-primary-600 rounded-full" />
+      </div>
+    );
+  }
+
+  const displayName = user?.name?.split(' ')[0] || 'Pengguna';
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white pt-20">
+      <div className="max-w-[1400px] mx-auto px-6 sm:px-8 lg:px-12 py-8 animate-fade-in-up">
+        {/* Welcome Section */}
+        <div className="mb-10">
+          <div className="flex items-center gap-4 mb-2">
+            <h1 className="text-3xl lg:text-4xl font-extrabold text-gray-900">
+              Halo, <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-purple-600">{displayName}</span>!
+            </h1>
+            <span className="px-3 py-1 bg-primary-100 text-primary-700 text-xs font-semibold rounded-full capitalize">
+              {isPenjual ? 'Penjual' : isOperator ? 'Operator' : 'Pembeli'}
+            </span>
+          </div>
+          <p className="text-gray-500 text-lg">
+            {isPenjual
+              ? 'Kelola toko Anda dan pantau penjualan'
+              : isOperator
+              ? 'Pantau aktivitas marketplace'
+              : 'Lanjutkan belanja dan cek pesanan Anda'
+            }
+          </p>
+        </div>
+
+        {/* Quick Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 lg:gap-6 mb-10">
+          {isPembeli && (
+            <>
+              <Link href="/products" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-primary-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                  </svg>
+                </div>
+                <p className="text-2xl font-bold text-gray-900">Belanja</p>
+                <p className="text-sm text-gray-500">Jelajahi produk terbaru</p>
+              </Link>
+              <Link href="/dashboard/orders" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-primary-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                </div>
+                <p className="text-2xl font-bold text-gray-900">{orders.length}</p>
+                <p className="text-sm text-gray-500">Pesanan</p>
+              </Link>
+              <Link href="/dashboard/wallet" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-primary-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  </svg>
+                </div>
+                <p className="text-2xl font-bold text-gray-900">
+                  {wallet ? `Rp${(wallet.balance || 0).toLocaleString('id-ID')}` : 'Rp0'}
+                </p>
+                <p className="text-sm text-gray-500">Saldo Wallet</p>
+              </Link>
+              <Link href="/dashboard" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-primary-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </div>
+                <p className="text-lg font-bold text-gray-900">Dashboard</p>
+                <p className="text-sm text-gray-500">Kelola akun</p>
+              </Link>
+            </>
+          )}
+
+          {isPenjual && (
+            <>
+              <Link href="/seller/products" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-secondary-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                  </svg>
+                </div>
+                <p className="text-2xl font-bold text-gray-900">Produk</p>
+                <p className="text-sm text-gray-500">Kelola produk Anda</p>
+              </Link>
+              <Link href="/seller/orders" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-secondary-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                </div>
+                <p className="text-2xl font-bold text-gray-900">{orders.length}</p>
+                <p className="text-sm text-gray-500">Pesanan Masuk</p>
+              </Link>
+              <Link href="/seller/wallet" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-secondary-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  </svg>
+                </div>
+                <p className="text-2xl font-bold text-gray-900">
+                  {wallet ? `Rp${(wallet.balance || 0).toLocaleString('id-ID')}` : 'Rp0'}
+                </p>
+                <p className="text-sm text-gray-500">Saldo</p>
+              </Link>
+              <Link href="/seller" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-secondary-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                  </svg>
+                </div>
+                <p className="text-lg font-bold text-gray-900">Dashboard</p>
+                <p className="text-sm text-gray-500">Lihat laporan toko</p>
+              </Link>
+            </>
+          )}
+
+          {isOperator && (
+            <>
+              <Link href="/operator/users" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-purple-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+                  </svg>
+                </div>
+                <p className="text-2xl font-bold text-gray-900">Users</p>
+                <p className="text-sm text-gray-500">Kelola pengguna</p>
+              </Link>
+              <Link href="/operator/orders" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-purple-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                </div>
+                <p className="text-2xl font-bold text-gray-900">{orders.length}</p>
+                <p className="text-sm text-gray-500">Pesanan</p>
+              </Link>
+              <Link href="/operator/reports" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-purple-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+                <p className="text-lg font-bold text-gray-900">Laporan</p>
+                <p className="text-sm text-gray-500">Lihat data & analitik</p>
+              </Link>
+              <Link href="/products" className="group bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-lg hover:border-purple-100 transition-all duration-300 card-hover">
+                <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                  </svg>
+                </div>
+                <p className="text-lg font-bold text-gray-900">Produk</p>
+                <p className="text-sm text-gray-500">Lihat semua produk</p>
+              </Link>
+            </>
+          )}
+        </div>
+
+        {/* Recent Orders Section */}
+        {(isPembeli || isPenjual) && orders.length > 0 && (
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-8">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-gray-900">
+                {isPenjual ? 'Pesanan Terbaru' : 'Pesanan Terkini'}
+              </h2>
+              <Link href={isPenjual ? '/seller/orders' : '/dashboard/orders'} className="text-sm text-primary-600 hover:text-primary-700 font-medium">
+                Lihat Semua
+              </Link>
+            </div>
+            <div className="space-y-4">
+              {orders.slice(0, 5).map((order: any, idx: number) => (
+                <Link
+                  key={order._id || idx}
+                  href={isPenjual ? `/seller/orders` : `/dashboard/orders/${order._id}`}
+                  className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
+                      <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-900 text-sm">{order.orderNumber || `#${order._id?.slice(-6)}`}</p>
+                      <p className="text-xs text-gray-500">
+                        {order.items?.length || 0} item — Rp{(order.grandTotal || 0).toLocaleString('id-ID')}
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`px-3 py-1 rounded-lg text-xs font-semibold ${
+                    order.status === 'selesai' ? 'bg-green-100 text-green-700' :
+                    order.status === 'dikirim' ? 'bg-blue-100 text-blue-700' :
+                    order.status === 'diproses' ? 'bg-purple-100 text-purple-700' :
+                    order.status === 'dibatalkan' ? 'bg-red-100 text-red-700' :
+                    'bg-yellow-100 text-yellow-700'
+                  }`}>
+                    {order.status || 'pending'}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Quick Navigation */}
+        <div className="bg-gradient-to-br from-primary-600 to-purple-700 rounded-2xl p-8 text-white">
+          <h2 className="text-2xl font-bold mb-2">Butuh Bantuan?</h2>
+          <p className="text-primary-100 mb-6">
+            {isPenjual
+              ? 'Atur produk, pantau pesanan, dan kembangkan toko Anda'
+              : isOperator
+              ? 'Kelola pengguna, pantau pesanan, dan lihat laporan'
+              : 'Jelajahi produk terbaru, cek pesanan, dan top up wallet Anda'
+            }
+          </p>
+          <div className="flex flex-wrap gap-4">
+            {isPembeli && (
+              <>
+                <Link href="/products" className="bg-white/20 backdrop-blur-sm px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition-colors">
+                  Mulai Belanja
+                </Link>
+                <Link href="/dashboard/wallet" className="bg-white/20 backdrop-blur-sm px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition-colors">
+                  Top Up Wallet
+                </Link>
+                <Link href="/dashboard/address" className="bg-white/20 backdrop-blur-sm px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition-colors">
+                  Atur Alamat
+                </Link>
+              </>
+            )}
+            {isPenjual && (
+              <>
+                <Link href="/seller/products/add" className="bg-white/20 backdrop-blur-sm px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition-colors">
+                  Tambah Produk
+                </Link>
+                <Link href="/seller" className="bg-white/20 backdrop-blur-sm px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition-colors">
+                  Dashboard Toko
+                </Link>
+              </>
+            )}
+            {isOperator && (
+              <>
+                <Link href="/operator/users" className="bg-white/20 backdrop-blur-sm px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition-colors">
+                  Kelola User
+                </Link>
+                <Link href="/operator/reports" className="bg-white/20 backdrop-blur-sm px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition-colors">
+                  Lihat Laporan
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
