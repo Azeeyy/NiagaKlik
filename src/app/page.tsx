@@ -567,6 +567,13 @@ function LoggedInHomePage({ user }: { user: any }) {
 
   useEffect(() => {
     fetchData();
+
+    // Auto-refresh setiap 30 detik agar status pesanan selalu terbaru
+    const interval = setInterval(() => {
+      fetchData();
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
 
   async function fetchData() {
@@ -599,11 +606,11 @@ function LoggedInHomePage({ user }: { user: any }) {
         }
       } else if (isOperator) {
         const [ordersRes] = await Promise.all([
-          fetch('/api/operator/reports'),
+          fetch('/api/operator/orders'),
         ]);
         if (ordersRes.ok) {
           const data = await ordersRes.json();
-          setOrders(data.recentOrders || []);
+          setOrders(data.orders || []);
         }
       }
     } catch (err) {
@@ -809,13 +816,13 @@ function LoggedInHomePage({ user }: { user: any }) {
                     </div>
                   </div>
                   <span className={`px-3 py-1 rounded-lg text-xs font-semibold ${
-                    order.status === 'selesai' ? 'bg-green-100 text-green-700' :
-                    order.status === 'dikirim' ? 'bg-blue-100 text-blue-700' :
-                    order.status === 'diproses' ? 'bg-purple-100 text-purple-700' :
-                    order.status === 'dibatalkan' ? 'bg-red-100 text-red-700' :
+                    order.orderStatus === 'selesai' ? 'bg-green-100 text-green-700' :
+                    order.orderStatus === 'dikirim' ? 'bg-blue-100 text-blue-700' :
+                    order.orderStatus === 'diproses' ? 'bg-purple-100 text-purple-700' :
+                    order.orderStatus === 'dibatalkan' ? 'bg-red-100 text-red-700' :
                     'bg-yellow-100 text-yellow-700'
                   }`}>
-                    {order.status || 'pending'}
+                    {order.orderStatus || 'pending'}
                   </span>
                 </Link>
               ))}
