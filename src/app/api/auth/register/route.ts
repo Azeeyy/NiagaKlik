@@ -46,6 +46,24 @@ export async function POST(req: NextRequest) {
 
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
+      // If user exists but not verified, resend OTP and redirect to verification
+      if (!existingUser.isVerified) {
+        const otp = generateOTP();
+        existingUser.otp = otp;
+        existingUser.otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        existingUser.name = name || existingUser.name;
+        existingUser.role = role || existingUser.role;
+        await existingUser.save();
+
+        await sendOTPEmail(email, otp);
+
+        return NextResponse.json({
+          message: 'Email sudah terdaftar namun belum diverifikasi. Kode OTP baru telah dikirim.',
+          redirectToOtp: true,
+          email: email.toLowerCase(),
+        });
+      }
+
       return NextResponse.json({ error: 'Email sudah terdaftar' }, { status: 400 });
     }
 

@@ -59,6 +59,12 @@ function RegisterContent() {
         return;
       }
 
+      if (data.redirectToOtp) {
+        toast.success('Email sudah terdaftar namun belum diverifikasi. Kode OTP baru telah dikirim!');
+        router.push(`/verify-otp?email=${encodeURIComponent(data.email || form.email)}&redirect=${encodeURIComponent(redirect)}`);
+        return;
+      }
+
       toast.success('Registrasi berhasil! Silakan verifikasi OTP');
       router.push(`/verify-otp?email=${encodeURIComponent(form.email)}&redirect=${encodeURIComponent(redirect)}`);
     } catch (err) {
