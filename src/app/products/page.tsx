@@ -14,6 +14,7 @@ function ProductsContent() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState('terbaru');
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
   const limit = 12;
 
   const search = searchParams.get('search') || '';
@@ -69,27 +70,51 @@ function ProductsContent() {
             
             {/* Categories */}
             <div className="mb-6">
-              <h4 className="text-sm font-semibold text-gray-700 mb-3">Kategori</h4>
-              <div className="space-y-2">
-                <button
-                  onClick={() => router.push('/products')}
-                  className={`block w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                    !categoryFilter ? 'bg-primary-50 text-primary-600 font-medium' : 'text-gray-600 hover:bg-gray-50'
+              <button
+                onClick={() => setCategoriesOpen(!categoriesOpen)}
+                className="flex items-center justify-between w-full text-sm font-semibold text-gray-700 mb-3 group"
+              >
+                <span className="flex items-center gap-2">
+                  Kategori
+                  {!categoriesOpen && categoryFilter && (
+                    <span className="text-xs font-normal text-primary-600 bg-primary-50 px-2 py-0.5 rounded-full">
+                      {categoryFilter}
+                    </span>
+                  )}
+                </span>
+                <svg
+                  className={`w-4 h-4 text-gray-400 transition-transform duration-200 group-hover:text-gray-600 ${
+                    categoriesOpen ? 'rotate-180' : ''
                   }`}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
                 >
-                  Semua
-                </button>
-                {PRODUCT_CATEGORIES.map((cat) => (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <div className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                categoriesOpen ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'
+              }`}>
+                <div className="space-y-2 pt-1">
                   <button
-                    key={cat}
-                    onClick={() => router.push(`/products?category=${encodeURIComponent(cat)}`)}
+                    onClick={() => router.push('/products')}
                     className={`block w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                      categoryFilter === cat ? 'bg-primary-50 text-primary-600 font-medium' : 'text-gray-600 hover:bg-gray-50'
+                      !categoryFilter ? 'bg-primary-50 text-primary-600 font-medium' : 'text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    {cat}
+                    Semua
                   </button>
-                ))}
+                  {PRODUCT_CATEGORIES.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => router.push(`/products?category=${encodeURIComponent(cat)}`)}
+                      className={`block w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                        categoryFilter === cat ? 'bg-primary-50 text-primary-600 font-medium' : 'text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
