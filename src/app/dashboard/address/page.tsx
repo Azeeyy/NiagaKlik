@@ -255,9 +255,9 @@ export default function AddressPage() {
                 <p className="text-gray-600 mt-1">{addr.fullAddress}</p>
                 <div className="flex items-center gap-3 mt-1">
                   <p className="text-gray-500 text-sm">{addr.city}, {addr.province} {addr.postalCode}</p>
-                  {addr.lat && addr.lng && (
+                  {addr.lat != null && addr.lng != null && (
                     <p className="text-gray-400 text-xs">
-                      ({addr.lat.toFixed(4)}, {addr.lng.toFixed(4)})
+                      ({addr.lat?.toFixed(4)}, {addr.lng?.toFixed(4)})
                     </p>
                   )}
                 </div>

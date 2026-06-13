@@ -62,115 +62,216 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Beberapa produk tidak ditemukan' }, { status: 400 });
     }
 
-    // Calculate totals
-    let totalAmount = 0;
-    const orderItems = items.map((item: any) => {
-      const product = products.find((p: any) => p._id.toString() === item.productId);
+    // ─── Group items by sellerId ───
+    // Attach product data to each item
+    const itemsWithProducts = items.map((item: any) => {
+      const product = products.find(
+        (p: any) => p._id.toString() === item.productId
+      );
+      return { item, product };
+    });
+
+    // Group by seller
+    const sellerGroups: Record<
+      string,
+      { sellerId: string; sellerName: string; items: any[]; totalAmount: number }
+    > = {};
+
+    for (const { item, product } of itemsWithProducts) {
+      if (!product) continue;
+      const sellerKey = product.sellerId.toString();
+
+      if (!sellerGroups[sellerKey]) {
+        sellerGroups[sellerKey] = {
+          sellerId: sellerKey,
+          sellerName: product.sellerName,
+          items: [],
+          totalAmount: 0,
+        };
+      }
+
       const subtotal = product.price * item.quantity;
-      totalAmount += subtotal;
-      return {
+      sellerGroups[sellerKey].items.push({
         productId: product._id,
         productName: product.name,
         productImage: (product.images && product.images[0]) || '',
         quantity: item.quantity,
         price: product.price,
         subtotal,
-      };
-    });
-
-    const platformFee = paymentMethod !== 'cod' ? calculatePlatformFee(totalAmount) : 0;
-    const codFee = paymentMethod === 'cod' ? 5000 : 0;
-    const grandTotal = totalAmount + platformFee + (shippingCost || 0) + codFee;
-
-    // Check CN Wallet balance
-    if (paymentMethod === 'cn_wallet') {
-      const wallet = await Wallet.findOne({ userId: user._id });
-      if (!wallet || wallet.balance < grandTotal) {
-        return NextResponse.json({ error: 'Saldo CN Wallet tidak mencukupi' }, { status: 400 });
-      }
+      });
+      sellerGroups[sellerKey].totalAmount += subtotal;
     }
 
-    // Get seller ID from first product (simplified - assumes single seller per order)
-    const sellerId = products[0].sellerId;
+    const sellerKeys = Object.keys(sellerGroups);
+    const sellerCount = sellerKeys.length;
 
-    // Create order
-    const order = await Order.create({
-      orderNumber: generateOrderNumber(),
-      buyerId: user._id,
-      sellerId,
-      items: orderItems,
-      totalAmount,
-      platformFee,
-      grandTotal,
-      shippingCost: shippingCost || 0,
-      shippingAddress,
-      paymentMethod,
-      paymentStatus: paymentMethod === 'cod' ? 'pending' : 'paid',
-      orderStatus: 'pending',
-    });
+    // Distribute shipping cost evenly across orders so the total matches checkout preview
+    const shippingPerOrder = Math.round((shippingCost || 0) / sellerCount);
+    // Remainder goes to the first order to avoid rounding gaps
+    const shippingFirstOrder = (shippingCost || 0) - shippingPerOrder * (sellerCount - 1);
 
-    // Process payment
-    if (paymentMethod === 'cn_wallet') {
-      const buyerWallet = await Wallet.findOne({ userId: user._id });
-      if (buyerWallet) {
-        buyerWallet.balance -= grandTotal;
-        buyerWallet.transactions.push({
-          type: 'payment',
-          amount: grandTotal,
-          description: `Pembayaran pesanan #${order.orderNumber}`,
-          reference: order.orderNumber,
-          status: 'success',
-          createdAt: new Date(),
-        });
-        await buyerWallet.save();
-      }
-      order.paymentStatus = 'paid';
-      order.paidAt = new Date();
-      await order.save();
+    // ─── First pass: compute totals for each seller (without DB writes) ───
+    const orderComputations: {
+      key: string;
+      group: (typeof sellerGroups)[string];
+      groupShipping: number;
+      groupPlatformFee: number;
+      groupCodFee: number;
+      groupGrandTotal: number;
+    }[] = [];
 
-      // Transfer platform fee to system (record in a system wallet or just log)
-      // The seller gets paid when buyer confirms completion
-    }
+    let totalGrandForPayment = 0;
 
-    // Update product stock
-    for (const item of items) {
-      await Product.findByIdAndUpdate(item.productId, {
-        $inc: { stock: -item.quantity, soldCount: item.quantity }
+    for (let i = 0; i < sellerKeys.length; i++) {
+      const key = sellerKeys[i];
+      const group = sellerGroups[key];
+
+      // First order gets any rounding remainder
+      const groupShipping = i === 0 ? shippingFirstOrder : shippingPerOrder;
+      const groupPlatformFee =
+        paymentMethod !== 'cod' ? calculatePlatformFee(group.totalAmount) : 0;
+      const groupCodFee = paymentMethod === 'cod' ? 5000 : 0;
+      const groupGrandTotal =
+        group.totalAmount + groupPlatformFee + groupShipping + groupCodFee;
+
+      totalGrandForPayment += groupGrandTotal;
+
+      orderComputations.push({
+        key,
+        group,
+        groupShipping,
+        groupPlatformFee,
+        groupCodFee,
+        groupGrandTotal,
       });
     }
 
-    // Create notification for seller
-    const seller = await User.findById(sellerId);
-    await Notification.create({
-      userId: sellerId,
-      type: 'order',
-      title: 'Pesanan Baru!',
-      message: `Pesanan #${order.orderNumber} dari ${user.name} sebesar ${grandTotal.toLocaleString('id-ID')}`,
-      link: '/seller/orders',
-      metadata: {
-        orderId: order._id.toString(),
-        amount: grandTotal,
-        itemCount: items.length,
-      },
-    });
+    // Check CN Wallet balance against the actual total before making any DB changes
+    if (paymentMethod === 'cn_wallet') {
+      const wallet = await Wallet.findOne({ userId: user._id });
+      if (!wallet || wallet.balance < totalGrandForPayment) {
+        return NextResponse.json(
+          { error: 'Saldo CN Wallet tidak mencukupi' },
+          { status: 400 }
+        );
+      }
+    }
 
-    // Create notification for buyer
+    // ─── Second pass: create orders, update stock, send notifications ───
+    const createdOrders = [];
+
+    for (const comp of orderComputations) {
+      const { group, groupShipping, groupPlatformFee, groupGrandTotal } = comp;
+
+      const order = await Order.create({
+        orderNumber: generateOrderNumber(),
+        buyerId: user._id,
+        sellerId: group.sellerId,
+        items: group.items,
+        totalAmount: group.totalAmount,
+        platformFee: groupPlatformFee,
+        grandTotal: groupGrandTotal,
+        shippingCost: groupShipping,
+        shippingAddress,
+        paymentMethod,
+        paymentStatus: paymentMethod === 'cod' ? 'pending' : 'paid',
+        orderStatus: 'pending',
+      });
+
+      createdOrders.push(order);
+
+      // Update product stock for items in this group
+      for (const item of group.items) {
+        await Product.findByIdAndUpdate(item.productId, {
+          $inc: { stock: -item.quantity, soldCount: item.quantity },
+        });
+      }
+
+      // Notification for this seller
+      await Notification.create({
+        userId: group.sellerId,
+        type: 'order',
+        title: 'Pesanan Baru!',
+        message: `Pesanan #${order.orderNumber} dari ${user.name} sebesar ${groupGrandTotal.toLocaleString('id-ID')}`,
+        link: '/seller/orders',
+        metadata: {
+          orderId: order._id.toString(),
+          amount: groupGrandTotal,
+          itemCount: group.items.length,
+        },
+      });
+    }
+
+    // ─── Process payment once for all orders ───
+    if (paymentMethod === 'cn_wallet') {
+      const buyerWallet = await Wallet.findOne({ userId: user._id });
+      if (buyerWallet) {
+        buyerWallet.balance -= totalGrandForPayment;
+
+        // Add one transaction per order for clarity
+        for (const order of createdOrders) {
+          buyerWallet.transactions.push({
+            type: 'payment',
+            amount: order.grandTotal,
+            description: `Pembayaran pesanan #${order.orderNumber}`,
+            reference: order.orderNumber,
+            status: 'success',
+            createdAt: new Date(),
+          });
+        }
+
+        await buyerWallet.save();
+      }
+
+      // Mark all orders as paid
+      await Promise.all(
+        createdOrders.map((order) =>
+          Order.findByIdAndUpdate(order._id, {
+            paymentStatus: 'paid',
+            paidAt: new Date(),
+          })
+        )
+      );
+    }
+
+    // ─── Notification for buyer ───
+    const orderCount = createdOrders.length;
+    const orderNumbers = createdOrders.map((o) => `#${o.orderNumber}`).join(', ');
+
     await Notification.create({
       userId: user._id,
       type: 'order',
-      title: 'Pesanan Dibuat',
-      message: `Pesanan #${order.orderNumber} berhasil dibuat. Silakan tunggu diproses penjual.`,
+      title:
+        orderCount > 1
+          ? `${orderCount} Pesanan Dibuat`
+          : 'Pesanan Dibuat',
+      message:
+        orderCount > 1
+          ? `${orderCount} pesanan berhasil dibuat (${orderNumbers}). Silakan tunggu diproses masing-masing penjual.`
+          : `Pesanan ${orderNumbers} berhasil dibuat. Silakan tunggu diproses penjual.`,
       link: '/dashboard/orders',
       metadata: {
-        orderId: order._id.toString(),
-        amount: grandTotal,
+        orderId: createdOrders[0]._id.toString(),
+        amount: totalGrandForPayment,
         itemCount: items.length,
       },
     });
 
-    return NextResponse.json({ order, message: 'Pesanan berhasil dibuat' }, { status: 201 });
+    return NextResponse.json(
+      {
+        orders: createdOrders,
+        message:
+          orderCount > 1
+            ? `${orderCount} pesanan berhasil dibuat`
+            : 'Pesanan berhasil dibuat',
+      },
+      { status: 201 }
+    );
   } catch (error: any) {
     console.error('Order creation error:', error);
-    return NextResponse.json({ error: error.message || 'Gagal membuat pesanan' }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || 'Gagal membuat pesanan' },
+      { status: 500 }
+    );
   }
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCartStore, useAuthStore } from '@/lib/store';
 import { formatPrice, calculatePlatformFee } from '@/lib/utils';
@@ -68,11 +68,50 @@ function CheckoutContent() {
     }
   }
 
+  const sellerCount = useMemo(() => {
+    const uniqueSellers = new Set(checkoutItems.map(i => i.sellerId));
+    return uniqueSellers.size;
+  }, [checkoutItems]);
+
+  // Group items by seller
+  const sellerGroups = useMemo(() => {
+    const groups: Record<string, { sellerName: string; items: typeof checkoutItems; subtotal: number }> = {};
+    for (const item of checkoutItems) {
+      if (!groups[item.sellerId]) {
+        groups[item.sellerId] = { sellerName: item.sellerName, items: [], subtotal: 0 };
+      }
+      groups[item.sellerId].items.push(item);
+      groups[item.sellerId].subtotal += item.price * item.quantity;
+    }
+    return Object.values(groups);
+  }, [checkoutItems]);
+
+  // Per-seller shipping: distribute evenly to match the API
+  const shippingCost = 15000; // Fixed shipping for demo
+  const shippingPerSeller = Math.round(shippingCost / sellerCount);
+  const shippingFirstSeller = shippingCost - shippingPerSeller * (sellerCount - 1);
+
+  // Calculate per-seller totals
+  const sellerTotals = useMemo(() => {
+    return sellerGroups.map((group, i) => {
+      const groupShipping = i === 0 ? shippingFirstSeller : shippingPerSeller;
+      const groupFee = paymentMethod !== 'cod' ? calculatePlatformFee(group.subtotal) : 0;
+      const groupCod = paymentMethod === 'cod' && i === 0 ? 5000 : 0;
+      return {
+        ...group,
+        shipping: groupShipping,
+        platformFee: groupFee,
+        codFee: groupCod,
+        grandTotal: group.subtotal + groupFee + groupShipping + groupCod,
+      };
+    });
+  }, [sellerGroups, paymentMethod, shippingPerSeller, shippingFirstSeller]);
+
   const subtotal = checkoutItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const platformFee = paymentMethod !== 'cod' ? calculatePlatformFee(subtotal) : 0;
-  const shippingCost = 15000; // Fixed shipping for demo
   const codFee = paymentMethod === 'cod' ? 5000 : 0;
   const grandTotal = subtotal + platformFee + shippingCost + codFee;
+  const isMultiSeller = sellerCount > 1;
 
   async function handlePlaceOrder() {
     if (!selectedAddress) {
@@ -122,7 +161,8 @@ function CheckoutContent() {
         return;
       }
 
-      toast.success('Pesanan berhasil dibuat!');
+      const orderCount = data.orders?.length || 1;
+      toast.success(orderCount > 1 ? `${orderCount} pesanan berhasil dibuat!` : 'Pesanan berhasil dibuat!');
       clearCart();
       router.push('/dashboard/orders');
     } catch (err) {
@@ -229,6 +269,101 @@ function CheckoutContent() {
             )}
           </div>
 
+          {/* Seller Groups - show items grouped by seller */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+              </svg>
+              Pesanan dari Penjual
+              {isMultiSeller && (
+                <span className="ml-auto text-xs bg-orange-100 text-orange-700 px-3 py-1 rounded-full font-medium">
+                  {sellerCount} penjual
+                </span>
+              )}
+            </h2>
+
+            {isMultiSeller && (
+              <div className="bg-orange-50 border border-orange-100 rounded-xl p-3 mb-5 flex items-start gap-2">
+                <svg className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p className="text-sm text-orange-800">
+                  Pesanan dari beberapa penjual akan dikirim secara terpisah. Setiap pesanan dikenakan biaya kirim sendiri.
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {sellerTotals.map((group, idx) => (
+                <div
+                  key={group.sellerName + idx}
+                  className={`rounded-xl border-2 overflow-hidden transition-all ${
+                    isMultiSeller ? 'border-primary-100' : 'border-transparent'
+                  }`}
+                >
+                  {/* Seller Header */}
+                  <div className={`flex items-center justify-between px-4 py-3 ${
+                    isMultiSeller
+                      ? 'bg-gradient-to-r from-primary-50 to-blue-50 border-b border-primary-100'
+                      : 'bg-gray-50 border-b border-gray-100'
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                        isMultiSeller
+                          ? 'bg-gradient-to-br from-primary-500 to-purple-600'
+                          : 'bg-gray-400'
+                      }`}>
+                        {group.sellerName?.charAt(0) || 'T'}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-900 text-sm">{group.sellerName}</p>
+                        {isMultiSeller && (
+                          <p className="text-xs text-gray-500">Pesanan #{idx + 1}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">Subtotal</p>
+                      <p className="font-bold text-primary-600 text-sm">{formatPrice(group.subtotal)}</p>
+                    </div>
+                  </div>
+
+                  {/* Items in this group */}
+                  <div className="divide-y divide-gray-50 px-4">
+                    {group.items.map((item) => (
+                      <div key={item.productId} className="flex items-center gap-3 py-3">
+                        <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center text-xs text-gray-500 shrink-0 font-medium">
+                          {item.quantity}x
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+                          <p className="text-xs text-gray-500">{formatPrice(item.price)}</p>
+                        </div>
+                        <p className="text-sm font-semibold text-gray-900">{formatPrice(item.price * item.quantity)}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Seller-level totals */}
+                  {isMultiSeller && (
+                    <div className="bg-gray-50/80 px-4 py-2.5 border-t border-gray-100 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-3 text-gray-500">
+                        <span>Ongkir: <strong className="text-gray-700">{formatPrice(group.shipping)}</strong></span>
+                        {group.platformFee > 0 && (
+                          <span>Fee: <strong className="text-gray-700">{formatPrice(group.platformFee)}</strong></span>
+                        )}
+                      </div>
+                      <span className="font-bold text-primary-600 text-sm">
+                        {formatPrice(group.grandTotal)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Payment Method */}
           <div className="bg-white rounded-2xl border border-gray-100 p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-4">Metode Pembayaran</h2>
@@ -273,31 +408,81 @@ function CheckoutContent() {
         {/* Order Summary */}
         <div className="lg:col-span-2">
           <div className="bg-white rounded-2xl border border-gray-100 p-6 sticky top-24">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">Ringkasan Belanja</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <svg className="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              Ringkasan Belanja
+              {isMultiSeller && (
+                <span className="ml-auto text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">
+                  {sellerCount} pesanan
+                </span>
+              )}
+            </h2>
             
             <div className="space-y-4 mb-6">
-              {checkoutItems.map((item) => (
-                <div key={item.productId} className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center text-xs text-gray-500 shrink-0">
-                    {item.quantity}x
+              {sellerTotals.map((group, idx) => (
+                <div key={group.sellerName + idx}>
+                  {/* Seller header */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold ${
+                      isMultiSeller ? 'bg-primary-500' : 'bg-gray-400'
+                    }`}>
+                      {group.sellerName?.charAt(0) || 'T'}
+                    </div>
+                    <p className="text-xs font-semibold text-gray-700 truncate">{group.sellerName}</p>
+                    {isMultiSeller && (
+                      <span className="text-[10px] text-gray-400 ml-auto">Ongkir {formatPrice(group.shipping)}</span>
+                    )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
-                    <p className="text-xs text-gray-500">{formatPrice(item.price)}</p>
+
+                  {/* Items */}
+                  <div className="space-y-2 ml-8">
+                    {group.items.map((item) => (
+                      <div key={item.productId} className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-[10px] text-gray-500 shrink-0 font-medium">
+                          {item.quantity}x
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{item.name}</p>
+                          <p className="text-xs text-gray-500">{formatPrice(item.price)}</p>
+                        </div>
+                        <p className="text-sm font-semibold">{formatPrice(item.price * item.quantity)}</p>
+                      </div>
+                    ))}
                   </div>
-                  <p className="text-sm font-semibold">{formatPrice(item.price * item.quantity)}</p>
+
+                  {/* Seller subtotal */}
+                  {isMultiSeller && (
+                    <div className="flex justify-between text-xs text-gray-500 mt-1 ml-8 pb-2 border-b border-gray-50">
+                      <span>Subtotal {group.sellerName}</span>
+                      <span className="font-medium text-gray-700">{formatPrice(group.subtotal)}</span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
 
             <div className="border-t border-gray-100 pt-4 space-y-3">
+              {isMultiSeller ? (
+                <>
+                  {/* Per-seller shipping breakdown */}
+                  {sellerTotals.map((group, idx) => (
+                    <div key={idx} className="flex justify-between text-xs text-gray-500">
+                      <span className="truncate">Ongkir {group.sellerName}</span>
+                      <span className="font-medium text-gray-700">{formatPrice(group.shipping)}</span>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Ongkos Kirim</span>
+                  <span className="font-medium">{formatPrice(shippingCost)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Subtotal</span>
                 <span className="font-medium">{formatPrice(subtotal)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-500">Ongkos Kirim</span>
-                <span className="font-medium">{formatPrice(shippingCost)}</span>
               </div>
               {paymentMethod !== 'cod' && (
                 <div className="flex justify-between text-sm">
